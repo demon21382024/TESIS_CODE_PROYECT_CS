@@ -55,9 +55,9 @@ gait_reid_project/
 └── README.md
 \`\`\`
 
-
 ---
-## ⚙️ Cómo Empezar
+
+## Cómo Empezar
 
 Sigue estos pasos para configurar y ejecutar el proyecto localmente.
 
@@ -69,34 +69,34 @@ Sigue estos pasos para configurar y ejecutar el proyecto localmente.
 
 ### 2. Instalación
 
-1.  **Clona el repositorio:**
-    ```bash
-    git clone [https://github.com/demon21382024/TESIS_CODE_PROYECT_CS.git](https://github.com/demon21382024/TESIS_CODE_PROYECT_CS.git)
-    cd TESIS_CODE_PROYECT_CS
-    ```
+1. **Clona el repositorio:**
 
-2.  **Configura la ruta del Dataset:**
-    Abre `configs/settings.py` y modifica la variable `ROOT_PATH` para que apunte a la carpeta de tu dataset (ej. `.../archive/output`).
+   ```bash
+   git clone [https://github.com/demon21382024/TESIS_CODE_PROYECT_CS.git](https://github.com/demon21382024/TESIS_CODE_PROYECT_CS.git)
+   cd TESIS_CODE_PROYECT_CS
+   ```
+2. **Configura la ruta del Dataset:**
+   Abre `configs/settings.py` y modifica la variable `ROOT_PATH` para que apunte a la carpeta de tu dataset (ej. `.../archive/output`).
+3. **Crea y activa un entorno virtual:**
 
-3.  **Crea y activa un entorno virtual:**
-    ```bash
-    # Crear el entorno (puedes llamarlo 'venv' o como prefieras)
-    python -m venv venv
-  
-    # Activar en Windows (PowerShell)
-    .\venv\Scripts\Activate.ps1
-  
-    # Activar en Windows (CMD)
-    .\venv\Scripts\activate.bat
-  
-    # Activar en macOS/Linux
-    source venv/bin/activate
-    ```
+   ```bash
+   # Crear el entorno (puedes llamarlo 'venv' o como prefieras)
+   python -m venv venv
 
-4.  **Instala las dependencias:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+   # Activar en Windows (PowerShell)
+   .\venv\Scripts\Activate.ps1
+
+   # Activar en Windows (CMD)
+   .\venv\Scripts\activate.bat
+
+   # Activar en macOS/Linux
+   source venv/bin/activate
+   ```
+4. **Instala las dependencias:**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ### 3. Ejecutar el Pipeline de Entrenamiento
 
@@ -117,3 +117,4 @@ python train_hybrid.py
 
 * **Harold Alexis Victor Canto Vidal**
 * **Juan Manuel Torres Farfán**
+```
