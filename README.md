@@ -8,7 +8,7 @@ Este código es la implementación del trabajo de investigación "UN ENFOQUE HÍ
 
 ## Metodología
 
-El entrenamiento se divide en tres fases distintas para construir un modelo robusto:
+El entrenamiento se divide en tres fases distintas para construir un modelo robusto y modular:
 
 1. **Fase 1: Auto-Supervisada (SSL)**
 
@@ -31,7 +31,6 @@ El entrenamiento se divide en tres fases distintas para construir un modelo robu
 ## Estructura del Proyecto
 
 El proyecto está organizado de la siguiente manera para mantener la modularidad y escalabilidad:
-
 
 ```bash
 gait_reid_project/
