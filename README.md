@@ -112,9 +112,8 @@ python train_supervised.py
 # Paso 3: Aplicar el fine-tuning híbrido (usa el modelo supervisado)
 python train_hybrid.py
 ---
-
+```
 ## Autores :
 
 * **Harold Alexis Victor Canto Vidal**
 * **Juan Manuel Torres Farfán**
-```
