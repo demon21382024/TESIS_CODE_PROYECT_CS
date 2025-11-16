@@ -6,7 +6,7 @@ Este código es la implementación del trabajo de investigación "UN ENFOQUE HÍ
 
 ---
 
-## Metodología 
+## Metodología
 
 El entrenamiento se divide en tres fases distintas para construir un modelo robusto:
 
@@ -28,11 +28,12 @@ El entrenamiento se divide en tres fases distintas para construir un modelo robu
 
 ---
 
-## Estructura del Proyecto 
+## Estructura del Proyecto
 
 El proyecto está organizado de la siguiente manera para mantener la modularidad y escalabilidad:
 
-\`\`\`
+
+```bash
 gait_reid_project/
 ├── configs/
 │   └── settings.py
@@ -53,7 +54,7 @@ gait_reid_project/
 ├── train_supervised.py
 ├── train_hybrid.py
 └── README.md
-\`\`\`
+```
 
 ---
 
@@ -113,6 +114,7 @@ python train_supervised.py
 python train_hybrid.py
 ---
 ```
+
 ## Autores :
 
 * **Harold Alexis Victor Canto Vidal**
