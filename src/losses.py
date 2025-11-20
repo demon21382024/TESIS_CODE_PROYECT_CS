@@ -37,20 +37,40 @@ class TripletLoss(nn.Module):
     def forward(self, embeddings, labels):
         dist_matrix = torch.cdist(embeddings, embeddings, p=2)
         batch_size = embeddings.size(0)
-        loss = 0.0
+        
+        # 1. CORRECCIÓN: Inicializar 'loss' como un tensor de PyTorch.
+        # Esto permite la acumulación correcta y el uso de .item() al final.
+        loss = torch.tensor(0.0, device=embeddings.device) 
+        
         num_valid = 0
         
         for i in range(batch_size):
+            # i es el Ancla
+            
+            # Máscara para Positivos (misma etiqueta, no es el ancla)
             pos_mask = (labels == labels[i]) & (torch.arange(batch_size, device=labels.device) != i)
+            # Máscara para Negativos (etiqueta diferente)
             neg_mask = labels != labels[i]
             
+            # Chequeo si hay Positivos y Negativos disponibles en el lote
             if not pos_mask.any() or not neg_mask.any():
                 continue
             
+            # Hard Mining: Encontrar el Positivo más Duro (distancia máxima)
             hard_positive = dist_matrix[i][pos_mask].max()
+            # Hard Mining: Encontrar el Negativo más Duro (distancia mínima)
             hard_negative = dist_matrix[i][neg_mask].min()
             
-            loss += F.relu(hard_positive - hard_negative + self.margin)
+            # Triplet Loss: max(0, d(a,p) - d(a,n) + margin)
+            loss_i = F.relu(hard_positive - hard_negative + self.margin)
+            
+            # Acumular la pérdida
+            loss += loss_i
             num_valid += 1
         
-        return loss / max(num_valid, 1)
+        # 2. CORRECCIÓN: Asegurar que si no hay tripletas válidas (num_valid=0), 
+        # se devuelva un tensor cero con gradiente habilitado, no un float.
+        if num_valid > 0:
+            return loss / num_valid
+        else:
+            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
