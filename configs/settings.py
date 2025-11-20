@@ -14,20 +14,20 @@ BATCH_SIZE = 64
 ROOT_PATH = "C:/output"
 
 # --- Configuración SSL (Self-Supervised Learning) ---
-SSL_EPOCHS = 10
+SSL_EPOCHS = 60
 SSL_LEARNING_RATE = 3e-4
 SSL_TEMPERATURE = 0.07
 SSL_CHECKPOINT = "models/backbone_ssl_best.pth"
 
 # Configuración del subset para SSL
 SSL_USE_SUBSET = True
-SSL_SUBSET_SUBJECTS = 30
-SSL_SUBSET_CONDITIONS = ['nm-01', 'nm-02', 'nm-03', 'nm-04']
-SSL_SUBSET_ANGLES = ['090', '180']
-SSL_SUBSET_FRAMES_PER_SEQ = 15
+SSL_SUBSET_SUBJECTS = 60
+SSL_SUBSET_CONDITIONS = ['nm-01','nm-02','nm-03','nm-04','bg-01','cl-01']
+SSL_SUBSET_ANGLES = ['000', '054', '090', '126', '180']
+SSL_SUBSET_FRAMES_PER_SEQ = 24
 
 # --- Configuración Supervisada ---
-SUPERVISED_EPOCHS = 30
+SUPERVISED_EPOCHS = 40
 SUPERVISED_LEARNING_RATE = 1e-4  # Más bajo que SSL (fine-tuning)
 SUPERVISED_MARGIN = 0.3  # Para triplet loss
 SUPERVISED_CHECKPOINT = "models/supervised_model.pth"
@@ -39,12 +39,30 @@ SUPERVISED_SUBSET_VAL_SUBJECTS = 10
 SUPERVISED_SUBSET_TEST_SUBJECTS = 10
 SUPERVISED_SUBSET_FRAMES_PER_SEQ = 20
 
+"""
 SUPERVISED_CONFIG = {
-    'conditions': ['nm-01', 'nm-02'],
-    'angles': ['090'],
+    'conditions': ['nm-01','nm-02','nm-03','nm-04'],
+    'angles': ['000','054','090'],
     'train_range': (0, SUPERVISED_SUBSET_TRAIN_SUBJECTS if SUPERVISED_USE_SUBSET else 74),
     'val_range': (74, 74 + SUPERVISED_SUBSET_VAL_SUBJECTS if SUPERVISED_USE_SUBSET else 99),
     'test_range': (99, 99 + SUPERVISED_SUBSET_TEST_SUBJECTS if SUPERVISED_USE_SUBSET else 124),
+}
+"""
+
+SUPERVISED_CONFIG = {
+    'conditions': ['nm-01','nm-02','nm-03','nm-04'],
+    'angles': ['000','054','090'],
+    'train_range': (0, SUPERVISED_SUBSET_TRAIN_SUBJECTS),
+    'val_range': (
+        SUPERVISED_SUBSET_TRAIN_SUBJECTS,
+        SUPERVISED_SUBSET_TRAIN_SUBJECTS + SUPERVISED_SUBSET_VAL_SUBJECTS
+    ),
+    'test_range': (
+        SUPERVISED_SUBSET_TRAIN_SUBJECTS + SUPERVISED_SUBSET_VAL_SUBJECTS,
+        SUPERVISED_SUBSET_TRAIN_SUBJECTS +
+        SUPERVISED_SUBSET_VAL_SUBJECTS +
+        SUPERVISED_SUBSET_TEST_SUBJECTS
+    ),
 }
 
 # --- Verificación de Directorios ---
@@ -62,7 +80,7 @@ def check_paths():
 
 # --- Configuración Híbrida (Supervisada + Triplet) ---
 HYBRID_EPOCHS = 20
-HYBRID_LEARNING_RATE = 1e-5  # Tasa de aprendizaje muy baja para fine-tuning
+HYBRID_LEARNING_RATE = 1e-4  # Tasa de aprendizaje muy baja para fine-tuning
 HYBRID_TRIPLET_WEIGHT = 0.5  # Peso para balancear las dos pérdidas
 HYBRID_MARGIN = 0.3          # Margen para TripletLoss (mismo que SUPERVISED_MARGIN)
 HYBRID_CHECKPOINT = "models/hybrid_model_best.pth"
