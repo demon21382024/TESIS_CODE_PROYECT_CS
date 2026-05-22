@@ -6,13 +6,15 @@ from torch.utils.data import DataLoader
 import time
 import os
 
+import argparse
+
 # Importar desde nuestros módulos
 from configs import settings
 from src.data import CASIAB_Supervised
 from src.models import GaitBackbone, SupervisedReIDModel
 # Nota: La TripletLoss está en src.losses, pero este script usa CrossEntropy
 
-def train_supervised(config):
+def train_supervised(config, use_ssl=True):
     """Función principal de entrenamiento supervisado"""
     
     print("\n--- Cargando Datasets Supervisados ---")
@@ -36,14 +38,17 @@ def train_supervised(config):
     # --- Cargar Backbone Pre-entrenado ---
     backbone = GaitBackbone(embed_dim=256)
     
-    if os.path.exists(config.SSL_CHECKPOINT):
+    if use_ssl and os.path.exists(config.SSL_CHECKPOINT):
         # weights_only=False asegura compatibilidad con diccionarios guardados en PyTorch 2.6
         checkpoint = torch.load(config.SSL_CHECKPOINT, map_location=config.DEVICE, weights_only=False)
         backbone.load_state_dict(checkpoint['model_state_dict'])
         print(f"  ✓ Backbone SSL cargado exitosamente desde: {config.SSL_CHECKPOINT}")
         print(f"    (Epoch: {checkpoint.get('epoch', 'N/A')}, Loss: {checkpoint.get('loss', 0.0):.4f})")
     else:
-        print(f"  ⚠ ADVERTENCIA: No se encontró {config.SSL_CHECKPOINT}")
+        if not use_ssl:
+            print(f"  [ABLACIÓN] Modo --no-ssl activado. Ignorando Fase I.")
+        else:
+            print(f"  ⚠ ADVERTENCIA: No se encontró {config.SSL_CHECKPOINT}")
         print(f"    Entrenando desde cero (backbone aleatorio).")
     
     model = SupervisedReIDModel(
@@ -132,8 +137,13 @@ def train_supervised(config):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Entrenamiento Supervisado (Estabilización)")
+    parser.add_argument('--no-ssl', action='store_true', help="Ignorar el pre-entrenamiento SSL y arrancar desde cero (Ablación 1).")
+    args = parser.parse_args()
+
     # 1. Verificar rutas y configuraciones
     settings.check_paths()
     
     # 2. Iniciar el entrenamiento
-    train_supervised(settings)
+    use_ssl_flag = not args.no_ssl
+    train_supervised(settings, use_ssl=use_ssl_flag)

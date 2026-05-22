@@ -4,6 +4,8 @@ venv/
 
 # Modelos entrenados (archivos binarios grandes)
 models/*.pth
+guardados/
+*.pth
 
 # Cache de Python
 __pycache__/

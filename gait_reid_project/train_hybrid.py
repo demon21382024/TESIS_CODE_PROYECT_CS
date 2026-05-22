@@ -12,7 +12,7 @@ import numpy as np
 from configs import settings
 from src.data import CASIAB_Supervised
 from src.models import HybridGaitModel, SupervisedReIDModel, GaitBackbone
-from src.losses import TripletLoss
+from src.losses import TripletLoss, CircleLoss
 from src.samplers import RandomIdentitySampler
 
 def compute_mini_metrics(dist_matrix, q_labels, g_labels):
@@ -88,7 +88,7 @@ def train_hybrid(config):
         checkpoint = torch.load(sup_path, map_location=config.DEVICE, weights_only=False)
         try:
             supervised_model.load_state_dict(checkpoint['model_state_dict'])
-            print(f"\n[✓] ÉXITO: Pesos SUPERVISADOS (Fase 2) inyectados en el Híbrido.")
+            print(f"\n[OK] EXITO: Pesos SUPERVISADOS (Fase 2) inyectados en el Hibrido.")
             print(f"    El modelo arranca heredando el conocimiento Clasificador + SSL previo.")
         except Exception as e:
             print(f"  [X] Error de topología al cargar Supervisado: {e}")
@@ -116,7 +116,12 @@ def train_hybrid(config):
 
     # 4. Funciones de Pérdida
     criterion_ce = nn.CrossEntropyLoss()
-    criterion_triplet = TripletLoss(margin=config.HYBRID_MARGIN)
+    if config.USE_CIRCLE_LOSS:
+        criterion_triplet = CircleLoss(m=0.25, gamma=80)
+        print("[*] Pérdida métrica configurada: Circle Loss (m=0.25, gamma=80)")
+    else:
+        criterion_triplet = TripletLoss(margin=config.HYBRID_MARGIN)
+        print(f"[*] Pérdida métrica configurada: Triplet Loss (margin={config.HYBRID_MARGIN})")
 
     best_map = 0.0
 
@@ -193,9 +198,10 @@ def train_hybrid(config):
                         }, config.HYBRID_CHECKPOINT)
 
     print(f"\n[+] ENTRENAMIENTO HÍBRIDO PRO FINALIZADO. Mejor mAP en Señal Temprana: {best_map:.2f}%")
-    print(f"[*] Lanzando Evaluación Exhaustiva (Matriz 11x3) automáticamente...")
-    import subprocess
-    subprocess.run([sys.executable, "evaluate.py"])
+    if "--no-eval" not in sys.argv:
+        print(f"[*] Lanzando Evaluación Exhaustiva (Matriz 11x3) automáticamente...")
+        import subprocess
+        subprocess.run([sys.executable, "evaluate.py"])
 
 if __name__ == "__main__":
     settings.check_paths()

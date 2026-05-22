@@ -90,3 +90,68 @@ class TripletLoss(nn.Module):
             loss = loss_components.sum() * 0.0 
             
         return loss, fraction_active
+
+class CircleLoss(nn.Module):
+    """
+    Circle Loss para aprendizaje métrico (pairwise similarity).
+    Optimizado y vectorizado en PyTorch utilizando operaciones de tensores estables.
+    """
+    def __init__(self, m=0.25, gamma=80):
+        super().__init__()
+        self.m = m
+        self.gamma = gamma
+        
+    def forward(self, embeddings, labels):
+        # embeddings: [B, D] (ya normalizados L2)
+        # labels: [B]
+        B = embeddings.size(0)
+        device = embeddings.device
+        
+        # 1. Matriz de similitud coseno (al estar normalizados L2, dot product == similitud coseno)
+        sim_matrix = torch.matmul(embeddings, embeddings.t())
+        
+        # 2. Máscaras de positivos y negativos
+        labels_mat = labels.expand(B, B)
+        is_pos = labels_mat.eq(labels_mat.t())
+        is_neg = labels_mat.ne(labels_mat.t())
+        
+        # Excluir la auto-similitud diagonal
+        identity_mask = torch.eye(B, dtype=torch.bool, device=device)
+        is_pos = is_pos & ~identity_mask
+        
+        # 3. Parámetros de margen y pesos
+        op = 1 + self.m
+        on = -self.m
+        dp = 1 - self.m
+        dn = self.m
+        
+        # Calcular pesos alpha_p y alpha_n
+        ap = torch.clamp(op - sim_matrix, min=0.0)
+        an = torch.clamp(sim_matrix - on, min=0.0)
+        
+        # Calcular logits para positivos y negativos
+        logit_p = -self.gamma * ap * (sim_matrix - dp)
+        logit_n = self.gamma * an * (sim_matrix - dn)
+        
+        # Enmascarar elementos no válidos con un valor muy bajo para evitar influir en logsumexp
+        logit_p = logit_p.masked_fill(~is_pos, -1e9)
+        logit_n = logit_n.masked_fill(~is_neg, -1e9)
+        
+        # 4. Cálculo numéricamente estable con LogSumExp por fila
+        logsum_p = torch.logsumexp(logit_p, dim=1)
+        logsum_n = torch.logsumexp(logit_n, dim=1)
+        
+        # Usamos softplus(x) = log(1 + exp(x)) para máxima estabilidad numérica
+        loss_components = F.softplus(logsum_p + logsum_n)
+        
+        # Filtrar filas que no tengan positivos o negativos (evitar pérdidas rotas en batches desbalanceados)
+        has_pos = is_pos.sum(dim=1) > 0
+        has_neg = is_neg.sum(dim=1) > 0
+        valid_rows = has_pos & has_neg
+        
+        if valid_rows.sum() > 0:
+            loss = loss_components[valid_rows].mean()
+        else:
+            loss = loss_components.sum() * 0.0
+            
+        return loss, 0.0

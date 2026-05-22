@@ -6,16 +6,19 @@ import os
 import time
 from torch.utils.data import DataLoader
 
+import argparse
+
 # Importar desde nuestros módulos
 from configs import settings
 from src.data import CASIAB_Supervised
 from src.models import HybridGaitModel, SupervisedReIDModel, GaitBackbone
+from utils_reranking import re_ranking
 
 # =======================================================
 # 1. FUNCIONES AUXILIARES DE EXTRACCIÓN Y METRICAS
 # =======================================================
 
-def extract_features_with_info(data_loader, model, device):
+def extract_features_with_info(data_loader, model, device, phase='hybrid'):
     """Extrae embeddings y metadata del modelo en modo evaluación."""
     model.eval()
     
@@ -34,8 +37,11 @@ def extract_features_with_info(data_loader, model, device):
             images, labels, conditions_batch, angles_batch, subjects_batch = data
             images = images.to(device)
             
-            # El HybridGaitModel devuelve (logits, embeddings)
-            _, embeddings = model(images)
+            # Extraer embeddings dependiendo del tipo de modelo
+            if phase == 'ssl':
+                embeddings = model(images) # El backbone solo devuelve Z (embeddings)
+            else:
+                _, embeddings = model(images) # Supervised e Hybrid devuelven (logits, embeddings)
             
             all_embeddings.append(embeddings.cpu())
             all_labels.extend(labels.tolist())
@@ -52,7 +58,7 @@ def extract_features_with_info(data_loader, model, device):
     angles = np.array(all_angles)
     subjects = np.array(all_subjects)
     
-    print(f"[✓] Extracción completada en {time.time() - start_time:.1f}s. Total Muestras: {len(labels)}")
+    print(f"[OK] Extracción completada en {time.time() - start_time:.1f}s. Total Muestras: {len(labels)}")
     return embeddings, labels, conditions, angles, subjects
 
 def compute_reid_metrics_block(dist_matrix, query_labels, gallery_labels):
@@ -125,30 +131,52 @@ def compute_reid_metrics_block(dist_matrix, query_labels, gallery_labels):
 # 2. FUNCIÓN PRINCIPAL DE TESTING CON MATRIZ DE ÁNGULOS
 # =======================================================
 
-def test_reid_exhaustive(config):
+def test_reid_exhaustive(config, phase='hybrid'):
     print("\n" + "="*60)
-    print(" INICIANDO EVALUACIÓN EXHAUSTIVA CASIA-B (PROTOCOLO OFICIAL)")
+    print(f" INICIANDO EVALUACIÓN EXHAUSTIVA CASIA-B - FASE: {phase.upper()}")
     print("="*60)
     
-    # 1. Cargar el Modelo Híbrido Final (El que acabas de entrenar magistralmente)
-    model_path = config.HYBRID_CHECKPOINT # <-- CORRECCIÓN: Apuntando al modelo Híbrido (Mejor mAP)
+    # 1. Seleccionar el checkpoint según la fase
+    if phase == 'hybrid':
+        model_path = config.HYBRID_CHECKPOINT
+    elif phase == 'supervised':
+        model_path = config.SUPERVISED_CHECKPOINT
+    elif phase == 'ssl':
+        model_path = config.SSL_CHECKPOINT
+    else:
+        print("[X] Fase no reconocida.")
+        return
+
     if not os.path.exists(model_path):
         print(f"[X] ERROR CRÍTICO: No se encontró {model_path}")
         return
+        
     # PyTorch 2.6 restringe los pickles por seguridad. Permitiendo escalares (weights_only=False)
     checkpoint = torch.load(model_path, map_location=config.DEVICE, weights_only=False)
     
-    dummy_backbone = GaitBackbone()
-    dummy_supervised_model = SupervisedReIDModel(
-        backbone=dummy_backbone,
-        num_classes=checkpoint['num_classes']
-    )
-    
-    # Envolvemos el supervisado en el Hibrido para obtener la proyección de embeddings directa
-    model = HybridGaitModel(dummy_supervised_model).to(config.DEVICE)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    
-    print(f"✓ Modelo cargado estandarizado desde: {model_path}")
+    if phase == 'ssl':
+        model = GaitBackbone()
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model = model.to(config.DEVICE)
+        print(f"[OK] Modelo SSL cargado desde: {model_path}")
+    else:
+        dummy_backbone = GaitBackbone()
+        dummy_supervised_model = SupervisedReIDModel(
+            backbone=dummy_backbone,
+            num_classes=checkpoint.get('num_classes', 74)
+        )
+        
+        if phase == 'supervised':
+            # Para el supervisado, cargamos los pesos en el dummy_supervised_model PRIMERO
+            dummy_supervised_model.load_state_dict(checkpoint['model_state_dict'])
+            # Luego lo envolvemos en HybridGaitModel solo para tener acceso limpio a los embeddings
+            model = HybridGaitModel(dummy_supervised_model).to(config.DEVICE)
+            print(f"[OK] Modelo Supervisado cargado desde: {model_path}")
+        else: # hybrid
+            # Envolvemos el supervisado en el Hibrido y cargamos los pesos completos
+            model = HybridGaitModel(dummy_supervised_model).to(config.DEVICE)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"[OK] Modelo Hibrido cargado desde: {model_path}")
 
     # 2. Cargar Dataset de Prueba (Sobreescribiendo filtros para garantizar el conjunto completo)
     print("\n[+] Preparando Dataset de Prueba (Open-Set Retrieval: 50 Sujetos No Vistos)")
@@ -170,7 +198,7 @@ def test_reid_exhaustive(config):
     test_loader = DataLoader(test_dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
     
     # 3. Extracción Unificada
-    embeddings, labels, conditions, angles, subjects = extract_features_with_info(test_loader, model, config.DEVICE)
+    embeddings, labels, conditions, angles, subjects = extract_features_with_info(test_loader, model, config.DEVICE, phase)
     
     # 4. Partición Lógica de Vectores (Standard CASIA-B)
     print("\n[*] Fragmentando Espacio Latente en Gallery / Queries...")
@@ -196,7 +224,7 @@ def test_reid_exhaustive(config):
     
     # 5. Iteración de la Matriz Angular Categórica
     print("\n" + "="*80)
-    print(" 🛠️ MATRIZ DE DEGRADACIÓN ANGULAR (RANK-1 %)")
+    print(" MATRIZ DE DEGRADACION ANGULAR (RANK-1 %)")
     print("="*80)
     
     for condition_name, (q_e, q_l, q_a, q_sub, q_cond) in query_sets.items():
@@ -206,7 +234,12 @@ def test_reid_exhaustive(config):
         print(f"\n--- Prueba: {condition_name} ({len(q_e)} Probes) ---")
         
         # Calcular Matriz D Global Probe vs Gallery para esta condición
-        dist_matrix_all = torch.cdist(q_e, g_embeds, p=2)
+        if config.USE_RERANKING:
+            dist_matrix_all = re_ranking(q_e.to(config.DEVICE), g_embeds.to(config.DEVICE), 
+                                         k1=config.RERANK_K1, k2=config.RERANK_K2, 
+                                         lambda_val=config.RERANK_LAMBDA)
+        else:
+            dist_matrix_all = torch.cdist(q_e, g_embeds, p=2)
         
         r1, r5, r10, mAP_cond, ap_scores = compute_reid_metrics_block(dist_matrix_all, q_l, g_labels)
         overall_mAPs.append(mAP_cond)
@@ -224,7 +257,12 @@ def test_reid_exhaustive(config):
             sub_q_l = q_l[angle_mask]
             
             # Matriz específica para este ángulo
-            sub_dist_matrix = torch.cdist(sub_q_e, g_embeds, p=2)
+            if config.USE_RERANKING:
+                sub_dist_matrix = re_ranking(sub_q_e.to(config.DEVICE), g_embeds.to(config.DEVICE), 
+                                             k1=config.RERANK_K1, k2=config.RERANK_K2, 
+                                             lambda_val=config.RERANK_LAMBDA)
+            else:
+                sub_dist_matrix = torch.cdist(sub_q_e, g_embeds, p=2)
             sub_r1, _, _, _, _ = compute_reid_metrics_block(sub_dist_matrix, sub_q_l, g_labels)
             
             angle_r1_list.append(f"{specific_angle}°: {sub_r1:04.1f}%")
@@ -241,16 +279,21 @@ def test_reid_exhaustive(config):
     final_map = np.mean(overall_mAPs)
     
     print("\n" + "="*60)
-    print(" 📊 VEREDICTO FINAL DE TOPOLOGÍA VOLUMÉTRICA")
+    print(" VEREDICTO FINAL DE TOPOLOGIA VOLUMETRICA")
     print("="*60)
     print(f"Baseline Temporal (Antiguo): mAP 29.23%")
     print(f"Modelo Volumétrico Actual:   mAP {final_map:.2f}%")
     
     if final_map > 29.23:
-        print("\n[✓] CRECIMIENTO ESTADÍSTICO CONFIRMADO.")
+        print("\n[OK] CRECIMIENTO ESTADISTICO CONFIRMADO.")
         print("La transición a Tensión Temporal [T, C, H, W] y Dual Pooling superó exitosamente")
         print("las deficiencias del ResNet-18 estático. La tesis es matemáticamente sólida.")
     
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Evaluar diferentes fases del modelo.")
+    parser.add_argument('--phase', type=str, default='hybrid', choices=['ssl', 'supervised', 'hybrid'],
+                        help="La fase del modelo a evaluar (ssl, supervised, hybrid).")
+    args = parser.parse_args()
+    
     settings.check_paths()
-    test_reid_exhaustive(settings)
+    test_reid_exhaustive(settings, phase=args.phase)
