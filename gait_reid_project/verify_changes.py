@@ -8,15 +8,15 @@ def verify_model():
     try:
         backbone = GaitBackbone()
         model = SupervisedReIDModel(backbone, num_classes=10)
-        x = torch.randn(2, 1, 128, 128)
+        x = torch.randn(2, 15, 1, 64, 64)
         logits = model(x)
-        print(f"  ✓ Model forward pass successful. Output shape: {logits.shape}")
+        print(f"  [OK] Model forward pass successful. Output shape: {logits.shape}")
         if logits.shape == (2, 10):
-            print("  ✓ Output shape is correct.")
+            print("  [OK] Output shape is correct.")
         else:
-            print(f"  X Output shape mismatch. Expected (2, 10), got {logits.shape}")
+            print(f"  [FAIL] Output shape mismatch. Expected (2, 10), got {logits.shape}")
     except Exception as e:
-        print(f"  X Model verification failed: {e}")
+        print(f"  [FAIL] Model verification failed: {e}")
 
 def verify_sampler():
     print("\nVerifying RandomIdentitySampler...")
@@ -26,16 +26,21 @@ def verify_sampler():
         for i in range(10):
             data_source.append((f"img_{pid}_{i}.png", pid))
             
+    class MockDataset:
+        def __init__(self, data):
+            self.samples = [{'label': pid, 'file': file} for file, pid in data]
+            
+    dataset = MockDataset(data_source)
     batch_size = 16
     num_instances = 4
-    sampler = RandomIdentitySampler(data_source, batch_size, num_instances)
     
-    print(f"  Data source size: {len(data_source)}")
-    print(f"  Batch size: {batch_size}, Num instances: {num_instances}")
-    
-    iterator = iter(sampler)
-    batch = []
     try:
+        sampler = RandomIdentitySampler(dataset, batch_size, num_instances)
+        print(f"  Data source size: {len(data_source)}")
+        print(f"  Batch size: {batch_size}, Num instances: {num_instances}")
+        
+        iterator = iter(sampler)
+        batch = []
         for _ in range(batch_size):
             batch.append(next(iterator))
             
@@ -50,12 +55,12 @@ def verify_sampler():
         print(f"  PID Counts: {counts}")
         
         if all(c == num_instances for c in counts.values()):
-            print("  ✓ Sampler produced correct P x K distribution.")
+            print("  [OK] Sampler produced correct P x K distribution.")
         else:
-            print("  X Sampler distribution incorrect.")
+            print("  [FAIL] Sampler distribution incorrect.")
             
     except Exception as e:
-        print(f"  X Sampler verification failed: {e}")
+        print(f"  [FAIL] Sampler verification failed: {e}")
 
 if __name__ == "__main__":
     verify_model()

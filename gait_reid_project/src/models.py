@@ -41,8 +41,13 @@ class GaitBackbone(nn.Module):
         self.layer3 = resnet.layer3
         self.layer4 = resnet.layer4
         
-        # Spatial Average Pooling (por frame)
-        self.avgpool = resnet.avgpool
+        # HPP: Spatial Average Pooling por franja horizontal (2 partes: Cuerpo Superior e Inferior)
+        self.avgpool = nn.AdaptiveAvgPool2d((2, 1))
+        
+        # Proyección HPP: Unificar el espacio latente de ambas franjas
+        self.hpp_project = nn.Linear(2048, 1024)
+        nn.init.normal_(self.hpp_project.weight.data, 0.0, 0.01)
+        nn.init.constant_(self.hpp_project.bias.data, 0.0)
         
         # Pooling Dual a través de la secuencia en el tiempo (GAP + GMP)
         self.temporal_pool = TemporalPooling()
@@ -67,8 +72,8 @@ class GaitBackbone(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        x = self.avgpool(x)
-        x = x.flatten(1) # [B*T, 512]
+        x = self.avgpool(x) # [B*T, 512, 2, 1]
+        x = x.view(x.size(0), 512, 2) # [B*T, 512, 2]
         return x
         
     def forward(self, x):
@@ -78,16 +83,23 @@ class GaitBackbone(nn.Module):
         # 1. Plegar el lote en una lista masiva transaccional [B*T, C, H, W]
         x_fold = x.view(B * T, C, H, W)
         
-        # 2. Extracción espacial frame a frame
-        features_2d = self.spatial_forward(x_fold) # [B*T, 512]
+        # 2. Extracción espacial frame a frame (con HPP)
+        features_2d = self.spatial_forward(x_fold) # [B*T, 512, 2]
         
-        # 3. Restaurar dimensionalidad temporal [B, T, 512]
-        features_3d = features_2d.view(B, T, -1) 
+        # 3. Restaurar dimensionalidad temporal [B, T, 512, 2]
+        features_3d = features_2d.view(B, T, 512, 2) 
         
-        # 4. Pooling Dual Temporal Integrado [B, 1024]
-        temporal_embedding = self.temporal_pool(features_3d) 
+        # 4. Pooling Dual Temporal Integrado por parte:
+        z_upper = self.temporal_pool(features_3d[:, :, :, 0]) # [B, 1024]
+        z_lower = self.temporal_pool(features_3d[:, :, :, 1]) # [B, 1024]
         
-        # 5. Pipeline SSL InfoNCE
+        # 5. Concatenar ambas franjas:
+        z_hpp = torch.cat([z_upper, z_lower], dim=1) # [B, 2048]
+        
+        # 6. Unificación a 1024 dimensiones
+        temporal_embedding = self.hpp_project(z_hpp) # [B, 1024]
+        
+        # 7. Pipeline SSL InfoNCE
         z = self.projection(temporal_embedding)
         z = F.normalize(z, dim=1)
         return z
@@ -97,18 +109,20 @@ class SupervisedReIDModel(nn.Module):
     def __init__(self, backbone, num_classes, freeze_backbone=False):
         super().__init__()
         
-        # Conservamos únicamente las capas del decodificador espacial local
+        # Conservamos únicamente las capas del decodificador espacial local con HPP
         self.spatial_encoder = nn.Sequential(
             backbone.conv1, backbone.bn1, backbone.relu, backbone.maxpool,
             backbone.layer1, backbone.layer2, backbone.layer3, backbone.layer4,
-            backbone.avgpool
+            backbone.avgpool # AdaptiveAvgPool2d((2,1))
         )
         self.temporal_pool = backbone.temporal_pool
+        self.hpp_project = backbone.hpp_project
         
         if freeze_backbone:
             for param in self.spatial_encoder.parameters(): param.requires_grad = False
             for param in self.temporal_pool.parameters(): param.requires_grad = False
-            print("  ✓ Backbone Espacial/Temporal congelado")
+            for param in self.hpp_project.parameters(): param.requires_grad = False
+            print("  ✓ Backbone Espacial/Temporal/HPP congelado")
             
         feature_dim = 1024 # 512(GAP) + 512(GMP)
         
@@ -125,14 +139,34 @@ class SupervisedReIDModel(nn.Module):
         B, T, C, H, W = x.size()
         
         x_fold = x.view(B * T, C, H, W)
-        spatial_features = self.spatial_encoder(x_fold).flatten(1) # [B*T, 512]
+        spatial_features = self.spatial_encoder(x_fold) # [B*T, 512, 2, 1]
+        spatial_features = spatial_features.view(B * T, 512, 2)
         
-        temporal_features = spatial_features.view(B, T, -1) # [B, T, 512]
-        pooled_features = self.temporal_pool(temporal_features) # [B, 1024]
+        temporal_features = spatial_features.view(B, T, 512, 2) # [B, T, 512, 2]
+        
+        # Pooling Temporal Dual por parte
+        z_upper = self.temporal_pool(temporal_features[:, :, :, 0]) # [B, 1024]
+        z_lower = self.temporal_pool(temporal_features[:, :, :, 1]) # [B, 1024]
+        
+        z_hpp = torch.cat([z_upper, z_lower], dim=1) # [B, 2048]
+        pooled_features = self.hpp_project(z_hpp) # [B, 1024]
         
         embeddings = self.bn(pooled_features)
         logits = self.classifier(embeddings)
         return logits
+
+    def load_state_dict(self, state_dict, strict=True):
+        # Si faltan las claves de hpp_project (checkpoint antiguo), cargar de forma parcial
+        missing_keys = []
+        for key in ["hpp_project.weight", "hpp_project.bias"]:
+            if key not in state_dict:
+                missing_keys.append(key)
+        
+        if len(missing_keys) > 0:
+            print(f"\n  [!] Advertencia: Cargando checkpoint antiguo. Claves HPP faltantes: {missing_keys}.")
+            print("      Inicializando hpp_project de forma aleatoria (se optimizará durante el entrenamiento).")
+            return super().load_state_dict(state_dict, strict=False)
+        return super().load_state_dict(state_dict, strict=strict)
 
 class HybridGaitModel(nn.Module):
     """
@@ -144,6 +178,7 @@ class HybridGaitModel(nn.Module):
         
         self.spatial_encoder = supervised_model.spatial_encoder
         self.temporal_pool = supervised_model.temporal_pool
+        self.hpp_project = supervised_model.hpp_project
         self.bn = supervised_model.bn
         self.classifier = supervised_model.classifier
     
@@ -151,10 +186,17 @@ class HybridGaitModel(nn.Module):
         B, T, C, H, W = x.size()
         
         x_fold = x.view(B * T, C, H, W)
-        spatial_features = self.spatial_encoder(x_fold).flatten(1) 
+        spatial_features = self.spatial_encoder(x_fold) # [B*T, 512, 2, 1]
+        spatial_features = spatial_features.view(B * T, 512, 2)
         
-        temporal_features = spatial_features.view(B, T, -1)
-        pooled_features = self.temporal_pool(temporal_features) 
+        temporal_features = spatial_features.view(B, T, 512, 2)
+        
+        # Pooling Temporal Dual por parte
+        z_upper = self.temporal_pool(temporal_features[:, :, :, 0]) # [B, 1024]
+        z_lower = self.temporal_pool(temporal_features[:, :, :, 1]) # [B, 1024]
+        
+        z_hpp = torch.cat([z_upper, z_lower], dim=1) # [B, 2048]
+        pooled_features = self.hpp_project(z_hpp) # [B, 1024]
         
         embeddings = self.bn(pooled_features)
         logits = self.classifier(embeddings)
@@ -162,3 +204,15 @@ class HybridGaitModel(nn.Module):
         normalized_embeddings = F.normalize(embeddings, p=2, dim=1)
         
         return logits, normalized_embeddings
+
+    def load_state_dict(self, state_dict, strict=True):
+        # Si faltan las claves de hpp_project (checkpoint antiguo), cargar de forma parcial
+        missing_keys = []
+        for key in ["hpp_project.weight", "hpp_project.bias"]:
+            if key not in state_dict:
+                missing_keys.append(key)
+        
+        if len(missing_keys) > 0:
+            print(f"\n  [!] Advertencia: Cargando checkpoint antiguo en Hybrid. Claves HPP faltantes: {missing_keys}.")
+            return super().load_state_dict(state_dict, strict=False)
+        return super().load_state_dict(state_dict, strict=strict)

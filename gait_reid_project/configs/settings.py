@@ -69,7 +69,7 @@ HYBRID_CHECKPOINT = "models/hybrid_model_final_PRO.pth"
 
 # --- Optimización de Mapeo (Ablaciones) ---
 USE_CIRCLE_LOSS = False
-USE_RERANKING = False
+USE_RERANKING = True
 RERANK_K1 = 20
 RERANK_K2 = 6
 RERANK_LAMBDA = 0.3

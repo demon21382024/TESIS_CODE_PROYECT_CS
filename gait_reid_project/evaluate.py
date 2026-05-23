@@ -263,9 +263,9 @@ def test_reid_exhaustive(config, phase='hybrid'):
                                              lambda_val=config.RERANK_LAMBDA)
             else:
                 sub_dist_matrix = torch.cdist(sub_q_e, g_embeds, p=2)
-            sub_r1, _, _, _, _ = compute_reid_metrics_block(sub_dist_matrix, sub_q_l, g_labels)
+            sub_r1, _, _, sub_map, _ = compute_reid_metrics_block(sub_dist_matrix, sub_q_l, g_labels)
             
-            angle_r1_list.append(f"{specific_angle}°: {sub_r1:04.1f}%")
+            angle_r1_list.append(f"{specific_angle}°: R1 {sub_r1:04.1f}% / mAP {sub_map:04.1f}%")
             
         print(" | ".join(angle_r1_list))
         

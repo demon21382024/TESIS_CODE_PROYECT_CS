@@ -120,6 +120,7 @@ class CASIAB_Supervised(Dataset):
         
         self.root = Path(root_path)
         self.seq_len = seq_len
+        self.img_size = img_size
         self.augment = augment
         self.return_info = return_info
         self.samples = [] 
@@ -173,10 +174,31 @@ class CASIAB_Supervised(Dataset):
         frames = sample['frames']
         total_len = len(frames)
         
-        # En Entrenamiento (augment=True): Extraemos fase aleatoria.
+        # En Entrenamiento (augment=True): Extraemos fase aleatoria y parámetros de aumentación espacial.
         # En Validación/Prueba: Extraemos el medio de la trayectoria para consistencia de evaluación mAP.
+        do_scale = False
+        scale_factor = 1.0
+        do_erase = False
+        erase_params = {}
+        
         if self.augment:
             start_idx = random.randint(0, total_len - self.seq_len)
+            
+            # 1. Random Horizontal Scaling (Ancho corporal) - 50% de probabilidad
+            if random.random() < 0.5:
+                do_scale = True
+                scale_factor = random.uniform(0.85, 1.15)
+                
+            # 2. Random Erasing (Parche de oclusión) - 30% de probabilidad
+            if random.random() < 0.3:
+                do_erase = True
+                # Definimos las coordenadas del parche una sola vez para mantener consistencia temporal
+                H, W = self.img_size
+                eh = random.randint(int(H * 0.05), int(H * 0.15))
+                ew = random.randint(int(W * 0.05), int(W * 0.15))
+                ey = random.randint(0, H - eh)
+                ex = random.randint(0, W - ew)
+                erase_params = {'y': ey, 'x': ex, 'h': eh, 'w': ew}
         else:
             start_idx = (total_len - self.seq_len) // 2 
             
@@ -184,10 +206,33 @@ class CASIAB_Supervised(Dataset):
         for i in range(self.seq_len):
             idx_f = min(start_idx + i, total_len - 1)
             img = Image.open(frames[idx_f]).convert("L")
+            
+            # Aplicar Random Horizontal Scale en PIL si está activado
+            if do_scale:
+                w_orig, h_orig = img.size
+                new_w = int(w_orig * scale_factor)
+                img_scaled = img.resize((new_w, h_orig), Image.BILINEAR)
+                
+                # Crear lienzo negro del tamaño original y pegar de forma centrada
+                new_img = Image.new("L", (w_orig, h_orig), 0)
+                if scale_factor < 1.0:
+                    offset = (w_orig - new_w) // 2
+                    new_img.paste(img_scaled, (offset, 0))
+                else:
+                    offset = (new_w - w_orig) // 2
+                    new_img.paste(img_scaled.crop((offset, 0, offset + w_orig, h_orig)))
+                img = new_img
+                
             img_t = self.base_transform(img)
             
             # Algoritmo Base de Invarianza Bidimensional
             img_aligned = center_of_mass_align(img_t)
+            
+            # Aplicar Random Erasing de forma consistente en el tensor alineado
+            if do_erase:
+                y, x, h_box, w_box = erase_params['y'], erase_params['x'], erase_params['h'], erase_params['w']
+                img_aligned[:, y:y+h_box, x:x+w_box] = 0.0
+                
             sampled_tensors.append(img_aligned)
             
         seq_tensor = torch.stack(sampled_tensors, dim=0) # Generando Volumetría [T, C, H, W]
