@@ -30,7 +30,7 @@ def train_supervised(config, use_ssl=True):
     
     # Se elimina val_dataset para evitar label shifts y ahorrar tiempo computacional
     # El modelo se evaluará empíricamente por su Train Loss
-    train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
     
     num_classes = train_dataset.get_num_classes()
     print(f"\nClases (personas) en train: {num_classes}")
@@ -143,6 +143,11 @@ if __name__ == "__main__":
 
     # 1. Verificar rutas y configuraciones
     settings.check_paths()
+
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision('high')
     
     # 2. Iniciar el entrenamiento
     use_ssl_flag = not args.no_ssl
